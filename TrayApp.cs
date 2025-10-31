@@ -21,78 +21,23 @@ namespace StyleWatcherWin
         public static string Prettify(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return raw;
-
-            var s = raw.Replace("\\n", "\n").Trim();
-            s = Regex.Replace(s, @"[ \t]+", " ");
-
-            var lines = new StringBuilder();
-            string titleLine = null;
-            string yestLine = null;
-            string weekSum = null;
-
-            // 标题 + 昨日销量
-            var titleMatch = Regex.Match(s, @"^(?<title>.*?)(?:[:：]\s*)?(?<yest>昨日[^\n]*)", RegexOptions.Singleline);
-            if (titleMatch.Success)
-            {
-                titleLine = titleMatch.Groups["title"].Value.Trim();
-                yestLine = titleMatch.Groups["yest"].Value.Trim();
-            }
-
-            // 近7天汇总
-            var weekMatch = Regex.Match(s, @"近\s*7\s*天\s*销量\s*汇\s*总[:：]\s*(?<sum>\d+)");
-            if (weekMatch.Success)
-            {
-                weekSum = $"近7天销量汇总：{weekMatch.Groups["sum"].Value}";
-            }
-
-            if (!string.IsNullOrEmpty(titleLine)) lines.AppendLine(titleLine);
-            if (!string.IsNullOrEmpty(yestLine)) lines.AppendLine(yestLine);
-            if (!string.IsNullOrEmpty(weekSum))  lines.AppendLine(weekSum);
-
-            // 按日期拆分：2025-10-24 开头的行
-            var segs = Regex.Split(s, @"(?=(20\d{2}-\d{2}-\d{2})\s+)");
-            foreach (var seg in segs)
-            {
-                var m = Regex.Match(seg, @"^(20\d{2}-\d{2}-\d{2})\s+(?<rest>.+)$");
-                if (!m.Success) continue;
-
-                var date = m.Groups[1].Value;
-                var rest = m.Groups["rest"].Value.Trim();
-
-                // : X件
-                var qtyMatch = Regex.Match(rest, @"[:：]\s*(\d+)\s*件");
-                var qtyText = qtyMatch.Success ? $"{qtyMatch.Groups[1].Value}件" : "";
-                if (qtyMatch.Success) rest = rest[..qtyMatch.Index].Trim();
-
-                // 尺码
-                var sizeMatch = Regex.Match(rest, @"\b(S|M|L|XL|2XL|3XL|4XL)\b");
-                string left = rest, size = "", color = "";
-                if (sizeMatch.Success)
-                {
-                    left = rest[..sizeMatch.Index].Trim();
-                    size = sizeMatch.Value;
-                    var after = rest[(sizeMatch.Index + sizeMatch.Length)..].Trim();
-                    var colorMatch = Regex.Match(after, @"^([^\s：:]+)");
-                    color = colorMatch.Success ? colorMatch.Groups[1].Value : after;
-                }
-
-                var prettyLine = new StringBuilder();
-                prettyLine.Append(date).Append("  ");
-                if (!string.IsNullOrEmpty(left))  prettyLine.Append(left).Append("  ");
-                if (!string.IsNullOrEmpty(size))  prettyLine.Append(size).Append("  ");
-                if (!string.IsNullOrEmpty(color)) prettyLine.Append(color).Append("  ");
-                if (!string.IsNullOrEmpty(qtyText)) prettyLine.Append("：").Append(qtyText);
-
-                var final = prettyLine.ToString().Trim();
-                if (!string.IsNullOrEmpty(final))
-                    lines.AppendLine(final);
-            }
-
-            var output = lines.ToString().TrimEnd();
-            if (string.IsNullOrWhiteSpace(output))
-                output = Regex.Replace(s, @"\s*\n\s*", "\n").Trim();
-
-            return output;
+    
+            // 1) 统一换行符
+            var s = raw.Replace("\\n", "\n");      // 兼容转义形式
+            s = s.Replace("\r\n", "\n");           // 统一为 \n
+    
+            // 2) 拆行后仅做首尾空白修剪
+            var lines = s.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+                lines[i] = lines[i].Trim();
+    
+            s = string.Join("\n", lines);
+    
+            // 3) 将 >=3 个连续空行压到 2 个，避免过多留白
+            s = System.Text.RegularExpressions.Regex.Replace(s, @"\n{3,}", "\n\n");
+    
+            // 4) 两端整体 Trim，保留内部结构
+            return s.Trim();
         }
     }
 
