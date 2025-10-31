@@ -26,9 +26,13 @@ jobs:
             -p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true `
             -o publish
 
+      - name: List publish dir (debug)
+        run: dir /b publish
+      
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: StyleWatcher-win-x64
-          path: publish/StyleWatcher.exe
+          path: publish/*.exe
           if-no-files-found: error
+
