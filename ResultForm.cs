@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -18,7 +17,6 @@ namespace StyleWatcherWin
         readonly Button _btnClose = new Button();
         readonly AppConfig _cfg;
 
-        // New UI
         readonly TabControl _tabs = new TabControl();
         readonly Label _lblTitle = new Label();
         readonly Label _lblYesterday = new Label();
@@ -33,7 +31,6 @@ namespace StyleWatcherWin
         public ResultForm(AppConfig cfg, string input, string result)
         {
             _cfg = cfg;
-
             Width = Math.Max(cfg.window.width, 1100);
             Height = Math.Max(cfg.window.height, 720);
             Text = "StyleWatcher";
@@ -56,7 +53,6 @@ namespace StyleWatcherWin
             BuildDetailsTab();
             BuildRawTab();
 
-            // Fill with first result
             ApplyRawText(result);
 
             var hint = new Label {
@@ -111,12 +107,10 @@ namespace StyleWatcherWin
             panel.Controls.Add(_chartDaily, 0, 1);
             panel.Controls.Add(_chartSizeTop, 1, 1);
 
-            page.Controls.Add(panel);
-
-            // 颜色 Top 独立放在底部 260px 高
             var sub = new Panel { Dock = DockStyle.Bottom, Height = 260, Padding = new Padding(8, 8, 8, 0) };
             _chartColorTop.Dock = DockStyle.Fill;
             sub.Controls.Add(_chartColorTop);
+            page.Controls.Add(panel);
             page.Controls.Add(sub);
 
             _tabs.TabPages.Add(page);
@@ -185,7 +179,6 @@ namespace StyleWatcherWin
             _lblYesterday.Text = string.IsNullOrEmpty(_parsed.Yesterday) ? "" : _parsed.Yesterday;
             _lblSum7d.Text = _parsed.Sum7d.HasValue ? $"近7天销量汇总：{_parsed.Sum7d.Value:N0}" : "";
 
-            // Daily totals
             var daily = _parsed.Records
                 .GroupBy(r => r.Date)
                 .Select(g => new { Day = g.Key, Qty = g.Sum(x => x.Qty) })
@@ -195,7 +188,6 @@ namespace StyleWatcherWin
             foreach (var d in daily)
                 _chartDaily.Series[0].Points.AddXY(d.Day.ToString("MM-dd"), d.Qty);
 
-            // Size Top10
             var bySize = _parsed.Records
                 .GroupBy(r => r.Size)
                 .Select(g => new { Size = string.IsNullOrWhiteSpace(g.Key) ? "(未知)" : g.Key, Qty = g.Sum(x => x.Qty) })
@@ -206,7 +198,6 @@ namespace StyleWatcherWin
             foreach (var it in bySize)
                 _chartSizeTop.Series[0].Points.AddXY(it.Size, it.Qty);
 
-            // Color Top10
             var byColor = _parsed.Records
                 .GroupBy(r => r.Color)
                 .Select(g => new { Color = string.IsNullOrWhiteSpace(g.Key) ? "(未知)" : g.Key, Qty = g.Sum(x => x.Qty) })
@@ -217,7 +208,6 @@ namespace StyleWatcherWin
             foreach (var it in byColor)
                 _chartColorTop.Series[0].Points.AddXY(it.Color, it.Qty);
 
-            // Details grid
             var list = _parsed.Records
                 .OrderByDescending(r => r.Date)
                 .ThenByDescending(r => r.Qty)

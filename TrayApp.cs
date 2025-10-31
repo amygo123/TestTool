@@ -6,13 +6,12 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
-using System.Windows.Automation;   // ← UI Automation
+using System.Windows.Automation;
 
 namespace StyleWatcherWin
 {
     public static class Formatter
     {
-        // 【保持最小清洗：严格保留结构与顺序】
         public static string Prettify(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return raw;
@@ -27,7 +26,6 @@ namespace StyleWatcherWin
 
     public class TrayApp : Form
     {
-        // ===== Win32 常量与 API =====
         [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
@@ -41,6 +39,10 @@ namespace StyleWatcherWin
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, ref int wParam, ref int lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, StringBuilder lParam);
 
         const int WM_GETTEXTLENGTH = 0x000E;
         const int WM_GETTEXT = 0x000D;
@@ -49,7 +51,7 @@ namespace StyleWatcherWin
         const int WM_HOTKEY = 0x0312;
         const uint MOD_ALT = 0x0001, MOD_CONTROL = 0x0002, MOD_SHIFT = 0x0004, MOD_WIN = 0x0008;
         const int KEYEVENTF_KEYUP = 0x0002;
-        const byte VK_MENU = 0x12; // Alt
+        const byte VK_MENU = 0x12;
 
         static void ReleaseAlt()
         {
@@ -92,7 +94,7 @@ namespace StyleWatcherWin
             base.OnLoad(e);
             ParseHotkey(_cfg.hotkey, out _mod, out _vk);
             if (!RegisterHotKey(Handle, _hotkeyId, _mod, _vk))
-                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。可在 appsettings.json 修改为 Ctrl+Shift+S / Ctrl+Alt+F12。", "StyleWatcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。", "StyleWatcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
             _tray.BalloonTipTitle = "StyleWatcher 已启动";
             _tray.BalloonTipText = $"选中文本后按 {_cfg.hotkey} 查询；右键托盘图标可手动输入或退出。";
@@ -101,12 +103,10 @@ namespace StyleWatcherWin
 
         protected override void WndProc(ref Message m)
         {
-            if (m.Msg == WM_HOTKEY) _ = OnHotkeyAsync();
+            if (m.Msg == 0x0312) _ = OnHotkeyAsync();
             base.WndProc(ref m);
         }
 
-        // ================== 核心：三层选中文本获取 ==================
-        // A. UI Automation（不动剪贴板）
         private string TryGetSelectedTextUsingUIA()
         {
             try
@@ -114,7 +114,6 @@ namespace StyleWatcherWin
                 var element = AutomationElement.FocusedElement;
                 if (element == null) return null;
 
-                // 优先精确选区
                 if (element.TryGetCurrentPattern(TextPattern.Pattern, out object tpObj) && tpObj is TextPattern tp)
                 {
                     var ranges = tp.GetSelection();
@@ -126,7 +125,6 @@ namespace StyleWatcherWin
                     }
                 }
 
-                // 退化：只能拿整段（某些输入框/地址栏）
                 if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object vpObj) && vpObj is ValuePattern vp)
                 {
                     var val = (vp.Current.Value ?? "").Trim();
@@ -137,7 +135,6 @@ namespace StyleWatcherWin
             return null;
         }
 
-        // B. Win32 经典文本控件（不动剪贴板，精确选区）
         private string TryGetSelectedTextUsingWin32()
         {
             try
@@ -148,7 +145,6 @@ namespace StyleWatcherWin
                 uint fgThread = GetWindowThreadProcessId(fg, out _);
                 uint curThread = GetCurrentThreadId();
 
-                // 将焦点线程与当前线程临时绑定，才能拿到前台窗口的焦点控件
                 bool attached = false;
                 try
                 {
@@ -156,21 +152,19 @@ namespace StyleWatcherWin
                     var hFocus = GetFocus();
                     if (hFocus == IntPtr.Zero) return null;
 
-                    // 先拿选区范围
-                    IntPtr start = IntPtr.Zero, end = IntPtr.Zero;
+                    int start = 0, end = 0;
                     SendMessage(hFocus, EM_GETSEL, ref start, ref end);
 
-                    // 再拿全部文本
                     int len = (int)SendMessage(hFocus, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
                     if (len <= 0) return null;
-                    var sb = new StringBuilder(len + 1);
-                    SendMessage(hFocus, WM_GETTEXT, (IntPtr)sb.Capacity, sb);
 
+                    var sb = new StringBuilder(len + 1);
+                    SendMessage(hFocus, WM_GETTEXT, sb.Capacity, sb);
                     var full = sb.ToString();
-                    int s = start.ToInt32(), e = end.ToInt32();
-                    if (s < 0 || e < 0 || s > full.Length) return null;
-                    if (e > full.Length) e = full.Length;
-                    if (e > s) return full.Substring(s, e - s).Trim();
+
+                    if (start < 0 || end < 0 || start > full.Length) return null;
+                    if (end > full.Length) end = full.Length;
+                    if (end > start) return full.Substring(start, end - start).Trim();
                 }
                 finally
                 {
@@ -181,27 +175,18 @@ namespace StyleWatcherWin
             return null;
         }
 
-        // EM_GETSEL 的重载（wParam/lParam 作为 out）
-        private static IntPtr SendMessage(IntPtr hWnd, int msg, ref IntPtr wParam, ref IntPtr lParam)
-        {
-            return SendMessage(hWnd, msg, wParam, lParam);
-        }
-
-        // C. 兜底：临时复制→立即还原剪贴板（对用户无感）
         private async Task<string> GetSelectionByClipboardRoundTripAsync()
         {
-            System.Windows.Forms.IDataObject backup = null;
+            IDataObject backup = null;
             try { backup = Clipboard.GetDataObject(); } catch { }
 
             SendKeys.SendWait("^c");
             await Task.Delay(120);
+
             string txt = "";
             try { txt = Clipboard.GetText()?.Trim() ?? ""; } catch { }
 
-            if (backup != null)
-            {
-                try { Clipboard.SetDataObject(backup, true); } catch { }
-            }
+            if (backup != null) { try { Clipboard.SetDataObject(backup, true); } catch { } }
             return txt;
         }
 
@@ -209,29 +194,24 @@ namespace StyleWatcherWin
         {
             try
             {
-                ReleaseAlt();  // 防止 Alt 残留
+                if ((GetAsyncKeyState(0x12) & 0x8000) != 0) keybd_event(0x12, 0, 0x0002, 0); // release Alt
 
-                // 1) UIA
                 string txt = TryGetSelectedTextUsingUIA();
-
-                // 2) Win32 经典控件
                 if (string.IsNullOrEmpty(txt))
                     txt = TryGetSelectedTextUsingWin32();
-
-                // 3) 兜底：复制→还原剪贴板
                 if (string.IsNullOrEmpty(txt))
                     txt = await GetSelectionByClipboardRoundTripAsync();
 
                 if (string.IsNullOrEmpty(txt))
                 {
-                    _tray.ShowBalloonTip(2000, "StyleWatcher", "未检测到选中文本，请在任意界面选中一段文字后再按热键。", ToolTipIcon.Info);
+                    _tray.ShowBalloonTip(2000, "StyleWatcher", "未检测到选中文本，请先选中一段文字再按热键。", ToolTipIcon.Info);
                     return;
                 }
 
                 string result = await QueryAsync(txt);
                 ShowResultWindow(txt, result);
 
-                ReleaseAlt(); // 再保险释放一次
+                if ((GetAsyncKeyState(0x12) & 0x8000) != 0) keybd_event(0x12, 0, 0x0002, 0);
             }
             catch (Exception ex)
             {
@@ -252,7 +232,7 @@ namespace StyleWatcherWin
                 else
                 {
                     req = new HttpRequestMessage(HttpMethod.Post, _cfg.api_url);
-                    var json = JsonSerializer.Serialize(new System.Collections.Generic.Dictionary<string,string> { { _cfg.json_key, text } });
+                    var json = System.Text.Json.JsonSerializer.Serialize(new System.Collections.Generic.Dictionary<string,string> { { _cfg.json_key, text } });
                     req.Content = new StringContent(json, Encoding.UTF8, "application/json");
                 }
                 var resp = await _http.SendAsync(req);
@@ -286,18 +266,18 @@ namespace StyleWatcherWin
         private void ParseHotkey(string s, out uint mod, out uint vk)
         {
             mod = 0; vk = 0;
-            if (string.IsNullOrWhiteSpace(s)) { mod = MOD_ALT; vk = (uint)Keys.S; return; }
+            if (string.IsNullOrWhiteSpace(s)) { mod = 0x1; vk = (uint)Keys.S; return; }
             var parts = s.Split(new[]{'+'}, StringSplitOptions.RemoveEmptyEntries);
             foreach (var p in parts)
             {
                 var t = p.Trim().ToUpperInvariant();
-                if (t == "CTRL" || t == "CONTROL") mod |= MOD_CONTROL;
-                else if (t == "SHIFT") mod |= MOD_SHIFT;
-                else if (t == "ALT") mod |= MOD_ALT;
-                else if (t == "WIN" || t == "WINDOWS") mod |= MOD_WIN;
+                if (t == "CTRL" || t == "CONTROL") mod |= 0x2;
+                else if (t == "SHIFT") mod |= 0x4;
+                else if (t == "ALT") mod |= 0x1;
+                else if (t == "WIN" || t == "WINDOWS") mod |= 0x8;
                 else if (Enum.TryParse<Keys>(t, true, out var key)) vk = (uint)key;
             }
-            if (vk == 0) { mod = MOD_ALT; vk = (uint)Keys.S; }
+            if (vk == 0) { mod = 0x1; vk = (uint)Keys.S; }
         }
 
         private void ShowResultWindow(string input, string result)

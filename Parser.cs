@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -45,7 +44,6 @@ namespace StyleWatcherWin
 
             foreach (var line in lines)
             {
-                // Title + yesterday
                 var mTitle = RxTitle.Match(line);
                 if (mTitle.Success && string.IsNullOrEmpty(result.Yesterday))
                 {
@@ -54,7 +52,6 @@ namespace StyleWatcherWin
                     continue;
                 }
 
-                // 7d sum
                 var mSum = RxSum.Match(line);
                 if (mSum.Success && !result.Sum7d.HasValue)
                 {
@@ -64,11 +61,9 @@ namespace StyleWatcherWin
                     continue;
                 }
 
-                // daily record
                 var m = RxLine.Match(line);
                 if (!m.Success) continue;
 
-                // split rest -> name + size + color
                 var rest = m.Groups["rest"].Value.Trim();
                 var tokens = rest.Split(new[]{' '}, StringSplitOptions.RemoveEmptyEntries).ToList();
                 string name = rest, size = "", color = "";
@@ -80,7 +75,7 @@ namespace StyleWatcherWin
                     if (idx > 0) name = rest.Substring(0, idx).Trim();
                 }
 
-                if (!DateTime.TryParseExact(m.Groups["date"].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+                if (!DateTime.TryParseExact(m.Groups["date"].Value, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
                     continue;
                 if (!int.TryParse(m.Groups["qty"].Value, out var qty)) qty = 0;
 
