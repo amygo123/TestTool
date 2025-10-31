@@ -39,6 +39,7 @@ namespace StyleWatcherWin
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, ref int wParam, ref int lParam);
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, StringBuilder lParam);
+        [DllImport("user32.dll")] static extern IntPtr GetFocus();
 
         const int WM_GETTEXTLENGTH = 0x000E;
         const int WM_GETTEXT = 0x000D;
