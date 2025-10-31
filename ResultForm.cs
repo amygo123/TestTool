@@ -235,6 +235,24 @@ namespace StyleWatcherWin
             BringToFront();
             Focus();
         }
+        public void ShowAndFocusCentered(bool topMost)
+        {
+            // 取光标所在屏的工作区（排除任务栏）
+            var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+
+            int x = wa.Left + (wa.Width  - Width)  / 2;
+            int y = wa.Top  + (wa.Height - Height) / 2;
+
+            Location = new Point(Math.Max(wa.Left, x), Math.Max(wa.Top, y));
+            TopMost = topMost;
+
+            if (!Visible) Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+            Focus();
+        }
+
         public void ShowNoActivateAtCursor()
         {
             var p = Cursor.Position;
