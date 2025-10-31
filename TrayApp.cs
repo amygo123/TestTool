@@ -3,50 +3,48 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
+using System.Windows.Automation;   // ← UI Automation
 
 namespace StyleWatcherWin
 {
     public static class Formatter
     {
-        /// <summary>
-        /// 将接口 msg 文本美化为易读格式：
-        /// 1) 顶部：标题（选中文本/商品线） + 昨日销量
-        /// 2) 第二行：近7天汇总
-        /// 3) 后续：按“日期 款名 尺码 颜色：X件”逐行展示
-        /// </summary>
+        // 【保持最小清洗：严格保留结构与顺序】
         public static string Prettify(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return raw;
-    
-            // 1) 统一换行符
-            var s = raw.Replace("\\n", "\n");      // 兼容转义形式
-            s = s.Replace("\r\n", "\n");           // 统一为 \n
-    
-            // 2) 拆行后仅做首尾空白修剪
+            var s = raw.Replace("\\n", "\n").Replace("\r\n", "\n");
             var lines = s.Split('\n');
-            for (int i = 0; i < lines.Length; i++)
-                lines[i] = lines[i].Trim();
-    
+            for (int i = 0; i < lines.Length; i++) lines[i] = lines[i].Trim();
             s = string.Join("\n", lines);
-    
-            // 3) 将 >=3 个连续空行压到 2 个，避免过多留白
             s = System.Text.RegularExpressions.Regex.Replace(s, @"\n{3,}", "\n\n");
-    
-            // 4) 两端整体 Trim，保留内部结构
             return s.Trim();
         }
     }
 
     public class TrayApp : Form
     {
+        // ===== Win32 常量与 API =====
         [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
         [DllImport("user32.dll")] static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
+
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [DllImport("user32.dll")] static extern IntPtr GetFocus();
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        const int WM_GETTEXTLENGTH = 0x000E;
+        const int WM_GETTEXT = 0x000D;
+        const int EM_GETSEL = 0x00B0;
 
         const int WM_HOTKEY = 0x0312;
         const uint MOD_ALT = 0x0001, MOD_CONTROL = 0x0002, MOD_SHIFT = 0x0004, MOD_WIN = 0x0008;
@@ -107,23 +105,133 @@ namespace StyleWatcherWin
             base.WndProc(ref m);
         }
 
+        // ================== 核心：三层选中文本获取 ==================
+        // A. UI Automation（不动剪贴板）
+        private string TryGetSelectedTextUsingUIA()
+        {
+            try
+            {
+                var element = AutomationElement.FocusedElement;
+                if (element == null) return null;
+
+                // 优先精确选区
+                if (element.TryGetCurrentPattern(TextPattern.Pattern, out object tpObj) && tpObj is TextPattern tp)
+                {
+                    var ranges = tp.GetSelection();
+                    if (ranges != null && ranges.Length > 0)
+                    {
+                        var txt = ranges[0].GetText(-1) ?? "";
+                        txt = txt.Trim();
+                        if (!string.IsNullOrEmpty(txt)) return txt;
+                    }
+                }
+
+                // 退化：只能拿整段（某些输入框/地址栏）
+                if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object vpObj) && vpObj is ValuePattern vp)
+                {
+                    var val = (vp.Current.Value ?? "").Trim();
+                    if (!string.IsNullOrEmpty(val)) return val;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        // B. Win32 经典文本控件（不动剪贴板，精确选区）
+        private string TryGetSelectedTextUsingWin32()
+        {
+            try
+            {
+                var fg = GetForegroundWindow();
+                if (fg == IntPtr.Zero) return null;
+
+                uint fgThread = GetWindowThreadProcessId(fg, out _);
+                uint curThread = GetCurrentThreadId();
+
+                // 将焦点线程与当前线程临时绑定，才能拿到前台窗口的焦点控件
+                bool attached = false;
+                try
+                {
+                    attached = AttachThreadInput(curThread, fgThread, true);
+                    var hFocus = GetFocus();
+                    if (hFocus == IntPtr.Zero) return null;
+
+                    // 先拿选区范围
+                    IntPtr start = IntPtr.Zero, end = IntPtr.Zero;
+                    SendMessage(hFocus, EM_GETSEL, ref start, ref end);
+
+                    // 再拿全部文本
+                    int len = (int)SendMessage(hFocus, WM_GETTEXTLENGTH, IntPtr.Zero, IntPtr.Zero);
+                    if (len <= 0) return null;
+                    var sb = new StringBuilder(len + 1);
+                    SendMessage(hFocus, WM_GETTEXT, (IntPtr)sb.Capacity, sb);
+
+                    var full = sb.ToString();
+                    int s = start.ToInt32(), e = end.ToInt32();
+                    if (s < 0 || e < 0 || s > full.Length) return null;
+                    if (e > full.Length) e = full.Length;
+                    if (e > s) return full.Substring(s, e - s).Trim();
+                }
+                finally
+                {
+                    if (attached) AttachThreadInput(curThread, fgThread, false);
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        // EM_GETSEL 的重载（wParam/lParam 作为 out）
+        private static IntPtr SendMessage(IntPtr hWnd, int msg, ref IntPtr wParam, ref IntPtr lParam)
+        {
+            return SendMessage(hWnd, msg, wParam, lParam);
+        }
+
+        // C. 兜底：临时复制→立即还原剪贴板（对用户无感）
+        private async Task<string> GetSelectionByClipboardRoundTripAsync()
+        {
+            System.Windows.Forms.IDataObject backup = null;
+            try { backup = Clipboard.GetDataObject(); } catch { }
+
+            SendKeys.SendWait("^c");
+            await Task.Delay(120);
+            string txt = "";
+            try { txt = Clipboard.GetText()?.Trim() ?? ""; } catch { }
+
+            if (backup != null)
+            {
+                try { Clipboard.SetDataObject(backup, true); } catch { }
+            }
+            return txt;
+        }
+
         private async Task OnHotkeyAsync()
         {
             try
             {
-                ReleaseAlt();
-                SendKeys.SendWait("^c");
-                await Task.Delay(120);
-                string txt = "";
-                try { txt = Clipboard.GetText()?.Trim() ?? ""; } catch {}
+                ReleaseAlt();  // 防止 Alt 残留
+
+                // 1) UIA
+                string txt = TryGetSelectedTextUsingUIA();
+
+                // 2) Win32 经典控件
+                if (string.IsNullOrEmpty(txt))
+                    txt = TryGetSelectedTextUsingWin32();
+
+                // 3) 兜底：复制→还原剪贴板
+                if (string.IsNullOrEmpty(txt))
+                    txt = await GetSelectionByClipboardRoundTripAsync();
+
                 if (string.IsNullOrEmpty(txt))
                 {
-                    _tray.ShowBalloonTip(2000, "StyleWatcher", "未检测到剪贴板文本，请先选中文本再按热键。", ToolTipIcon.Info);
+                    _tray.ShowBalloonTip(2000, "StyleWatcher", "未检测到选中文本，请在任意界面选中一段文字后再按热键。", ToolTipIcon.Info);
                     return;
                 }
+
                 string result = await QueryAsync(txt);
                 ShowResultWindow(txt, result);
-                ReleaseAlt();
+
+                ReleaseAlt(); // 再保险释放一次
             }
             catch (Exception ex)
             {
@@ -138,7 +246,9 @@ namespace StyleWatcherWin
                 var method = (_cfg.method ?? "POST").ToUpperInvariant();
                 HttpRequestMessage req;
                 if (method == "GET")
+                {
                     req = new HttpRequestMessage(HttpMethod.Get, $"{_cfg.api_url}?{_cfg.json_key}={Uri.EscapeDataString(text)}");
+                }
                 else
                 {
                     req = new HttpRequestMessage(HttpMethod.Post, _cfg.api_url);
@@ -147,6 +257,7 @@ namespace StyleWatcherWin
                 }
                 var resp = await _http.SendAsync(req);
                 var raw = await resp.Content.ReadAsStringAsync();
+
                 try
                 {
                     var doc = JsonDocument.Parse(raw);
