@@ -4,94 +4,86 @@ using System.Data;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using System.IO;
 
 using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Series;
 using OxyPlot.WindowsForms;
 
+using ClosedXML.Excel;
+
 namespace StyleWatcherWin
 {
+    // 主题与色板
+    static class UIStyle
+    {
+        public static readonly Font H1   = new Font("Microsoft YaHei UI", 13, FontStyle.Bold);
+        public static readonly Font Body = new Font("Microsoft YaHei UI", 10, FontStyle.Regular);
+
+        public static readonly Color HeaderBack = Color.FromArgb(245, 247, 250);
+        public static readonly Color TextDark   = Color.FromArgb(47, 47, 47);
+        public static readonly Color AccentBlue = Color.FromArgb(25, 145, 235);
+        public static readonly Color AccentGreen= Color.FromArgb(18, 183, 106);
+        public static readonly Color GridLine   = Color.FromArgb(235, 238, 245);
+
+        public static OxyColor Ox(byte r, byte g, byte b) => OxyColor.FromRgb(r, g, b);
+        public static OxyColor Ox(Color c) => OxyColor.FromRgb(c.R, c.G, c.B);
+    }
+
     public class ResultForm : Form
     {
-        readonly TextBox _boxInput = new TextBox();
-        readonly RichTextBox _boxRaw = new RichTextBox();
+        // 顶部：标题、摘要、操作
+        readonly Label _lblTitle = new Label();
+        readonly Label _lblSummary = new Label();
         readonly Button _btnQuery = new Button();
-        readonly Button _btnCopy = new Button();
-        readonly Button _btnClose = new Button();
-        readonly AppConfig _cfg;
+        readonly Button _btnExport = new Button();
+        readonly TextBox _boxInput = new TextBox();
 
+        // Tab
         readonly TabControl _tabs = new TabControl();
 
-        // 概览：标题/摘要
-        readonly Label _lblTitle = new Label();
-        readonly Label _lblYesterday = new Label();
-        readonly Label _lblSum7d = new Label();
-
-        // 图表（OxyPlot）
-        readonly PlotView _pvTrend = new PlotView();   // 7日趋势
-        readonly PlotView _pvSizeTop = new PlotView(); // 尺码 Top10
-        readonly PlotView _pvColorTop = new PlotView();// 颜色 Top10
+        // 图表
+        readonly PlotView _pvTrend = new PlotView();
+        readonly PlotView _pvSizeTop = new PlotView();
+        readonly PlotView _pvColorTop = new PlotView();
 
         // 明细
         readonly DataGridView _grid = new DataGridView();
+        readonly TextBox _boxSearch = new TextBox();
+        BindingSource _binding = new BindingSource();
+        List<dynamic> _detailRows = new List<dynamic>(); // 当前表数据源（加工后）
 
+        readonly AppConfig _cfg;
         ParsedPayload _parsed = new ParsedPayload();
 
         public ResultForm(AppConfig cfg)
         {
             _cfg = cfg;
-            Width  = Math.Max(cfg.window.width, 1100);
-            Height = Math.Max(cfg.window.height, 720);
+
             Text = "StyleWatcher";
             KeyPreview = true;
             StartPosition = FormStartPosition.Manual;
+            DoubleBuffered = true;
 
-            // 顶栏
-            var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 36, Padding = new Padding(6, 6, 6, 0) };
-            var lbl = new Label { Text = "选中文本：", AutoSize = true, Margin = new Padding(0, 8, 0, 0) };
-            _boxInput.Width = Width - 430;
-            _btnQuery.Text = "查询(Enter)";
-            _btnCopy.Text  = "复制原文";
-            _btnClose.Text = "隐藏(Esc)";
-            top.Controls.AddRange(new Control[] { lbl, _boxInput, _btnQuery, _btnCopy, _btnClose });
-            Controls.Add(top);
+            Width = Math.Max(cfg.window.width, 1100);
+            Height = Math.Max(cfg.window.height, 720);
+            BackColor = Color.White;
 
-            _tabs.Dock = DockStyle.Fill;
-            Controls.Add(_tabs);
+            BuildHeader();
+            BuildTabs();
 
-            BuildOverviewTab();
-            BuildDetailsTab();
-            BuildRawTab();
-
-            var hint = new Label
-            {
-                Dock = DockStyle.Bottom, Height = 22, ForeColor = Color.Gray,
-                Text = $"提示：热键可复用此窗口；Esc 隐藏；Ctrl+C 复制原文；Enter 重新查询。"
-            };
-            Controls.Add(hint);
-
-            _btnQuery.Click += async (s, e) =>
-            {
-                SetLoading("查询中...");
-                var textNow = _boxInput.Text.Trim();
-                var raw = await ApiHelper.QueryAsync(_cfg, textNow);
-                ApplyRawText(textNow, raw);
-            };
-            _btnCopy.Click += (s, e) => { try { Clipboard.SetText(_boxRaw.Text); } catch { } };
-            _btnClose.Click += (s, e) => this.Hide();
-
+            // 快捷键
             KeyDown += (s, e) =>
             {
                 if (e.KeyCode == Keys.Escape) this.Hide();
                 else if (e.KeyCode == Keys.Enter) _btnQuery.PerformClick();
-                else if (e.Control && e.KeyCode == Keys.C) { try { Clipboard.SetText(_boxRaw.Text); } catch { } }
             };
 
-            // 窗口缩放结束时重渲染，保证小窗也清晰
-            this.ResizeEnd += (s, e) =>
+            // 缩放后重渲染
+            ResizeEnd += (s, e) =>
             {
-                if (_parsed != null)
+                if (_parsed != null && _parsed.Records != null)
                 {
                     RenderTrend();
                     RenderTopCharts();
@@ -99,30 +91,87 @@ namespace StyleWatcherWin
             };
         }
 
-        // ============== 构建页 ==============
-        void BuildOverviewTab()
+        void BuildHeader()
         {
-            var page = new TabPage("概览");
+            // 顶部信息区（两行）
+            var header = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Height = 96,
+                Padding = new Padding(12, 10, 12, 10),
+                BackColor = UIStyle.HeaderBack,
+                ColumnCount = 2,
+                RowCount = 2
+            };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            header.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
 
-            // 头部信息
-            var header = new Panel { Dock = DockStyle.Top, Height = 100, Padding = new Padding(8) };
-            _lblTitle.Font = new Font("Microsoft YaHei UI", 12, FontStyle.Bold);
-            _lblYesterday.Font = new Font("Microsoft YaHei UI", 10);
-            _lblSum7d.Font = new Font("Microsoft YaHei UI", 10);
+            // 标题（左上）
+            _lblTitle.Dock = DockStyle.Fill;
             _lblTitle.AutoEllipsis = true;
-            _lblTitle.Dock = DockStyle.Top;
-            _lblYesterday.Dock = DockStyle.Top;
-            _lblSum7d.Dock = DockStyle.Top;
-            header.Controls.Add(_lblSum7d);
-            header.Controls.Add(_lblYesterday);
-            header.Controls.Add(_lblTitle);
+            _lblTitle.Text = "—";
+            _lblTitle.Font = UIStyle.H1;
+            _lblTitle.ForeColor = UIStyle.TextDark;
 
-            // 图表区：上 = 趋势（横跨两列），下 = 尺码Top10 / 颜色Top10
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(8) };
+            // 摘要（右上）
+            _lblSummary.Dock = DockStyle.Fill;
+            _lblSummary.TextAlign = ContentAlignment.MiddleRight;
+            _lblSummary.Font = new Font(UIStyle.Body, FontStyle.Regular);
+            _lblSummary.ForeColor = UIStyle.TextDark;
+
+            // 输入 + 重新查询（左下）
+            var pnlLeft = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0), Margin = new Padding(0) };
+            var lblInput = new Label { Text = "选中文本：", AutoSize = true, Margin = new Padding(0, 8, 8, 0), Font = UIStyle.Body };
+            _boxInput.Width = 520; _boxInput.Font = UIStyle.Body;
+            StyleBtn(_btnQuery, "重新查询");
+            _btnQuery.Click += async (s, e) =>
+            {
+                SetLoading("查询中...");
+                var textNow = _boxInput.Text.Trim();
+                var raw = await ApiHelper.QueryAsync(_cfg, textNow);
+                ApplyRawText(textNow, raw);
+            };
+            pnlLeft.Controls.AddRange(new Control[] { lblInput, _boxInput, _btnQuery });
+
+            // 导出（右下）
+            var pnlRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0), Margin = new Padding(0) };
+            StyleBtn(_btnExport, "导出Excel");
+            _btnExport.Click += (s, e) => ExportExcel();
+            pnlRight.Controls.Add(_btnExport);
+
+            header.Controls.Add(_lblTitle, 0, 0);
+            header.Controls.Add(_lblSummary, 1, 0);
+            header.Controls.Add(pnlLeft, 0, 1);
+            header.Controls.Add(pnlRight, 1, 1);
+            Controls.Add(header);
+        }
+
+        void StyleBtn(Button b, string text)
+        {
+            b.Text = text;
+            b.FlatStyle = FlatStyle.Flat;
+            b.FlatAppearance.BorderSize = 0;
+            b.Height = 28;
+            b.Width = 96;
+            b.Margin = new Padding(8, 4, 0, 0);
+            b.BackColor = Color.White;
+            b.Font = UIStyle.Body;
+        }
+
+        void BuildTabs()
+        {
+            _tabs.Dock = DockStyle.Fill;
+            Controls.Add(_tabs);
+
+            // 概览页
+            var pageOverview = new TabPage("概览") { BackColor = Color.White };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(12) };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 45)); // 趋势图 45%
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 55)); // Top10 55%
 
             _pvTrend.Dock = DockStyle.Fill;
             _pvSizeTop.Dock = DockStyle.Fill;
@@ -133,42 +182,49 @@ namespace StyleWatcherWin
             layout.Controls.Add(_pvSizeTop, 0, 1);
             layout.Controls.Add(_pvColorTop, 1, 1);
 
-            page.Controls.Add(layout);
-            page.Controls.Add(header);
-            _tabs.TabPages.Add(page);
-        }
+            pageOverview.Controls.Add(layout);
+            _tabs.TabPages.Add(pageOverview);
 
-        void BuildDetailsTab()
-        {
-            var page = new TabPage("明细");
+            // 明细页（加工数据）
+            var pageDetail = new TabPage("明细") { BackColor = Color.White };
+            var panelDetail = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(12) };
+            panelDetail.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+            panelDetail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0) };
+            _boxSearch.Width = 220; _boxSearch.Font = UIStyle.Body; _boxSearch.PlaceholderText = "搜索（日期/款式/尺码/颜色）";
+            _boxSearch.TextChanged += (s, e) => ApplyFilter(_boxSearch.Text);
+            bar.Controls.Add(_boxSearch);
+
             _grid.Dock = DockStyle.Fill;
             _grid.ReadOnly = true;
             _grid.AllowUserToAddRows = false;
             _grid.AllowUserToDeleteRows = false;
             _grid.RowHeadersVisible = false;
             _grid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            page.Controls.Add(_grid);
-            _tabs.TabPages.Add(page);
+            _grid.BackgroundColor = Color.White;
+            _grid.BorderStyle = BorderStyle.None;
+            _grid.EnableHeadersVisualStyles = false;
+            _grid.ColumnHeadersDefaultCellStyle.BackColor = Color.White;
+            _grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(50, 50, 50);
+            _grid.ColumnHeadersDefaultCellStyle.Font = new Font("Microsoft YaHei UI", 10, FontStyle.Bold);
+            _grid.DefaultCellStyle.Font = UIStyle.Body;
+            _grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(249, 251, 253);
+            _grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(230, 243, 255);
+            _grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+            _grid.DataSource = _binding;
+
+            panelDetail.Controls.Add(bar, 0, 0);
+            panelDetail.Controls.Add(_grid, 0, 1);
+            pageDetail.Controls.Add(panelDetail);
+            _tabs.TabPages.Add(pageDetail);
         }
 
-        void BuildRawTab()
-        {
-            var page = new TabPage("原文");
-            _boxRaw.ReadOnly = true;
-            _boxRaw.BorderStyle = BorderStyle.None;
-            _boxRaw.Dock = DockStyle.Fill;
-            _boxRaw.WordWrap = true;
-            _boxRaw.ScrollBars = RichTextBoxScrollBars.Vertical;
-            _boxRaw.Font = new Font("Microsoft YaHei UI", _cfg.window.fontSize);
-            page.Controls.Add(_boxRaw);
-            _tabs.TabPages.Add(page);
-        }
-
-        // ============== 对外 API（Tray 复用窗口） ==============
+        // 外部调用
         public void ShowAndFocusNearCursor(bool topMost)
         {
             var p = Cursor.Position;
-            var targetX = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Width - Width,  p.X + 12));
+            var targetX = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Width - Width, p.X + 12));
             var targetY = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Height - Height, p.Y + 12));
             Location = new Point(targetX, targetY);
 
@@ -182,7 +238,7 @@ namespace StyleWatcherWin
         public void ShowNoActivateAtCursor()
         {
             var p = Cursor.Position;
-            var targetX = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Width - Width,  p.X + 12));
+            var targetX = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Width - Width, p.X + 12));
             var targetY = Math.Max(0, Math.Min(Screen.PrimaryScreen.WorkingArea.Height - Height, p.Y + 12));
             Location = new Point(targetX, targetY);
             if (!Visible) Show();
@@ -191,32 +247,34 @@ namespace StyleWatcherWin
 
         public void SetLoading(string message)
         {
-            _boxRaw.Text  = message;
             _lblTitle.Text = "—";
-            _lblYesterday.Text = "";
-            _lblSum7d.Text = "";
+            _lblSummary.Text = message ?? "";
             _pvTrend.Model    = new PlotModel { Title = "最近日销量（加载中）" };
             _pvSizeTop.Model  = new PlotModel { Title = "尺码 Top10（加载中）" };
             _pvColorTop.Model = new PlotModel { Title = "颜色 Top10（加载中）" };
-            _grid.DataSource = null;
+            _binding.DataSource = null;
+            _detailRows.Clear();
         }
 
-        public void ApplyRawText(string input, string raw)
+        public void ApplyRawText(string input, string rawMsg)
         {
             _boxInput.Text = input ?? "";
-            _boxRaw.Text   = Formatter.Prettify(raw ?? "");
+            var pretty = Formatter.Prettify(rawMsg ?? "");
 
-            _parsed = PayloadParser.Parse(raw ?? "");
+            _parsed = PayloadParser.Parse(pretty ?? "");
 
-            _lblTitle.Text     = string.IsNullOrEmpty(_parsed.Title) ? "—" : _parsed.Title;
-            _lblYesterday.Text = string.IsNullOrEmpty(_parsed.Yesterday) ? "" : _parsed.Yesterday;
-            _lblSum7d.Text     = _parsed.Sum7d.HasValue ? $"近7天销量汇总：{_parsed.Sum7d.Value:N0}" : "";
+            // 标题与摘要
+            _lblTitle.Text = string.IsNullOrEmpty(_parsed.Title) ? "—" : _parsed.Title;
+            var yesterday = string.IsNullOrEmpty(_parsed.Yesterday) ? "昨日：—" : _parsed.Yesterday;
+            var sum7d = _parsed.Sum7d.HasValue ? $"近7天：{_parsed.Sum7d.Value:N0}" : "近7天：—";
+            _lblSummary.Text = $"{yesterday}    {sum7d}";
 
-            RenderTrend();     // 7日趋势
-            RenderTopCharts(); // 尺码/颜色 Top10
+            // 图表
+            RenderTrend();
+            RenderTopCharts();
 
-            // 明细表
-            var list = _parsed.Records
+            // 明细（只用加工后数据）
+            _detailRows = _parsed.Records
                 .OrderByDescending(r => r.Date).ThenByDescending(r => r.Qty)
                 .Select(r => new
                 {
@@ -225,40 +283,59 @@ namespace StyleWatcherWin
                     尺码 = string.IsNullOrWhiteSpace(r.Size) ? "(未知)" : r.Size,
                     颜色 = string.IsNullOrWhiteSpace(r.Color) ? "(未知)" : r.Color,
                     数量 = r.Qty
-                }).ToList();
-            _grid.DataSource = list;
+                }).Cast<dynamic>().ToList();
+
+            _binding.DataSource = _detailRows;
         }
 
         // ============== 图表渲染 ==============
         void RenderTrend()
         {
-            // 按日聚合最近 7 天（缺失日期补 0）
-            if (_parsed.Records.Count == 0)
+            if (_parsed.Records == null || _parsed.Records.Count == 0)
             {
                 _pvTrend.Model = new PlotModel { Title = "最近日销量（无数据）" };
                 return;
             }
 
             var maxDay = _parsed.Records.Max(x => x.Date).Date;
-            var start  = maxDay.AddDays(-6);
+            var start = maxDay.AddDays(-6);
             var dict = _parsed.Records
                 .GroupBy(r => r.Date.Date)
                 .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
             var days = Enumerable.Range(0, 7).Select(i => start.AddDays(i)).ToList();
 
             var model = new PlotModel { Title = "最近 7 天销量趋势" };
+            model.TextColor = UIStyle.Ox(UIStyle.TextDark);
+            model.PlotAreaBorderColor = UIStyle.Ox(220, 224, 230);
 
-            var cat = new CategoryAxis { Position = AxisPosition.Bottom, IsPanEnabled = false, IsZoomEnabled = false };
-            cat.Angle = -45; // 倾斜防止挤
+            var cat = new CategoryAxis
+            {
+                Position = AxisPosition.Bottom,
+                IsPanEnabled = false,
+                IsZoomEnabled = false,
+                Angle = -45,
+                MajorGridlineStyle = LineStyle.Solid,
+                MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine)
+            };
             foreach (var d in days) cat.Labels.Add(d.ToString("MM-dd"));
             model.Axes.Add(cat);
 
-            var yAxis = new LinearAxis { Position = AxisPosition.Left, MinorGridlineStyle = LineStyle.Dot };
+            var yAxis = new LinearAxis
+            {
+                Position = AxisPosition.Left,
+                MinorGridlineStyle = LineStyle.Dot,
+                MajorGridlineStyle = LineStyle.Solid,
+                MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine)
+            };
             model.Axes.Add(yAxis);
 
             var series = new LineSeries
             {
+                Color = UIStyle.Ox(UIStyle.AccentBlue),
+                MarkerFill = UIStyle.Ox(UIStyle.AccentBlue),
                 MarkerType = MarkerType.Circle,
+                MarkerSize = 3.5,
+                StrokeThickness = 2.2,
                 TrackerFormatString = "日期：{2}\n销量：{4}"
             };
             for (int i = 0; i < days.Count; i++)
@@ -274,26 +351,31 @@ namespace StyleWatcherWin
 
         void RenderTopCharts()
         {
-            // 尺码 Top10（降序，最大在上）
+            // 尺码 Top10
             var bySize = _parsed.Records
                 .GroupBy(r => string.IsNullOrWhiteSpace(r.Size) ? "(未知)" : r.Size)
                 .Select(g => new { Key = g.Key, Qty = g.Sum(x => x.Qty) })
                 .OrderByDescending(x => x.Qty).Take(10).ToList();
 
             var modelSize = new PlotModel { Title = "尺码 Top10（7天）" };
+            modelSize.TextColor = UIStyle.Ox(UIStyle.TextDark);
+            modelSize.PlotAreaBorderColor = UIStyle.Ox(220, 224, 230);
+
             var catSize = new CategoryAxis
             {
                 Position = AxisPosition.Left,
                 IsPanEnabled = false,
                 IsZoomEnabled = false,
-                // 反转方向：第一名在最上面
-                StartPosition = 1, EndPosition = 0
+                StartPosition = 1, EndPosition = 0, // 最大在上
+                MajorGridlineStyle = LineStyle.Solid,
+                MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine)
             };
             var serSize = new BarSeries
             {
                 LabelPlacement = LabelPlacement.Outside,
                 LabelFormatString = "{0}",
-                TrackerFormatString = "尺码：{Category}\n销量：{Value}"
+                TrackerFormatString = "尺码：{Category}\n销量：{Value}",
+                FillColor = UIStyle.Ox(30, 180, 120)
             };
             foreach (var it in bySize)
             {
@@ -301,30 +383,36 @@ namespace StyleWatcherWin
                 serSize.Items.Add(new BarItem(it.Qty));
             }
             modelSize.Axes.Add(catSize);
-            modelSize.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, MinorGridlineStyle = LineStyle.Dot });
+            modelSize.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, MinorGridlineStyle = LineStyle.Dot, MajorGridlineStyle = LineStyle.Solid, MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine) });
             modelSize.Series.Add(serSize);
             ApplyResponsiveStyles(modelSize, xTitle: "销量", yTitle: "尺码");
             _pvSizeTop.Model = modelSize;
 
-            // 颜色 Top10（降序，最大在上）
+            // 颜色 Top10
             var byColor = _parsed.Records
                 .GroupBy(r => string.IsNullOrWhiteSpace(r.Color) ? "(未知)" : r.Color)
                 .Select(g => new { Key = g.Key, Qty = g.Sum(x => x.Qty) })
                 .OrderByDescending(x => x.Qty).Take(10).ToList();
 
             var modelColor = new PlotModel { Title = "颜色 Top10（7天）" };
+            modelColor.TextColor = UIStyle.Ox(UIStyle.TextDark);
+            modelColor.PlotAreaBorderColor = UIStyle.Ox(220, 224, 230);
+
             var catColor = new CategoryAxis
             {
                 Position = AxisPosition.Left,
                 IsPanEnabled = false,
                 IsZoomEnabled = false,
-                StartPosition = 1, EndPosition = 0
+                StartPosition = 1, EndPosition = 0,
+                MajorGridlineStyle = LineStyle.Solid,
+                MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine)
             };
             var serColor = new BarSeries
             {
                 LabelPlacement = LabelPlacement.Outside,
                 LabelFormatString = "{0}",
-                TrackerFormatString = "颜色：{Category}\n销量：{Value}"
+                TrackerFormatString = "颜色：{Category}\n销量：{Value}",
+                FillColor = UIStyle.Ox(UIStyle.AccentBlue)
             };
             foreach (var it in byColor)
             {
@@ -332,13 +420,13 @@ namespace StyleWatcherWin
                 serColor.Items.Add(new BarItem(it.Qty));
             }
             modelColor.Axes.Add(catColor);
-            modelColor.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, MinorGridlineStyle = LineStyle.Dot });
+            modelColor.Axes.Add(new LinearAxis { Position = AxisPosition.Bottom, MinorGridlineStyle = LineStyle.Dot, MajorGridlineStyle = LineStyle.Solid, MajorGridlineColor = UIStyle.Ox(UIStyle.GridLine) });
             modelColor.Series.Add(serColor);
             ApplyResponsiveStyles(modelColor, xTitle: "销量", yTitle: "颜色");
             _pvColorTop.Model = modelColor;
         }
 
-        // ============== 自适配外观 ==============
+        // 自适配
         void ApplyResponsiveStyles(PlotModel model, string xTitle = null, string yTitle = null, double? fontScale = null, double? axisAngle = null)
         {
             if (model == null) return;
@@ -357,9 +445,110 @@ namespace StyleWatcherWin
                 if (ax.FontSize == 0) ax.FontSize = model.DefaultFontSize;
                 ax.FontSize *= scale;
 
-                // 让底部类目轴标签倾斜，避免过挤
                 if (axisAngle.HasValue && ax is CategoryAxis cat && ax.Position == AxisPosition.Bottom)
                     cat.Angle = axisAngle.Value;
+            }
+        }
+
+        // 过滤
+        void ApplyFilter(string keyword)
+        {
+            if (_detailRows == null || _detailRows.Count == 0)
+            {
+                _binding.DataSource = null;
+                return;
+            }
+            keyword = (keyword ?? "").Trim();
+            if (keyword.Length == 0)
+            {
+                _binding.DataSource = _detailRows;
+                return;
+            }
+            var lower = keyword.ToLowerInvariant();
+            var filtered = _detailRows.Where(r =>
+            {
+                string d = r.日期?.ToString()?.ToLowerInvariant() ?? "";
+                string n = r.款式?.ToString()?.ToLowerInvariant() ?? "";
+                string s = r.尺码?.ToString()?.ToLowerInvariant() ?? "";
+                string c = r.颜色?.ToString()?.ToLowerInvariant() ?? "";
+                string q = r.数量?.ToString()?.ToLowerInvariant() ?? "";
+                return d.Contains(lower) || n.Contains(lower) || s.Contains(lower) || c.Contains(lower) || q.Contains(lower);
+            }).ToList();
+            _binding.DataSource = filtered;
+        }
+
+        // 导出 Excel（ClosedXML）
+        void ExportExcel()
+        {
+            try
+            {
+                var exportsDir = Path.Combine(AppContext.BaseDirectory, "exports");
+                Directory.CreateDirectory(exportsDir);
+                var file = Path.Combine(exportsDir, $"StyleWatcher_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+
+                using var wb = new XLWorkbook();
+
+                // 摘要
+                var ws0 = wb.Worksheets.Add("摘要");
+                ws0.Cell(1, 1).Value = "标题";
+                ws0.Cell(1, 2).Value = _lblTitle.Text;
+                ws0.Cell(2, 1).Value = "摘要";
+                ws0.Cell(2, 2).Value = _lblSummary.Text;
+                ws0.Columns().AdjustToContents();
+
+                // 趋势7天
+                var ws1 = wb.Worksheets.Add("趋势7天");
+                var model = _pvTrend.Model;
+                // 由 _parsed 再聚合一次，保证导出不依赖图表对象
+                var maxDay = _parsed.Records.Any() ? _parsed.Records.Max(x => x.Date).Date : DateTime.Today;
+                var start = maxDay.AddDays(-6);
+                var dict = _parsed.Records
+                    .GroupBy(r => r.Date.Date)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+                ws1.Cell(1, 1).Value = "日期";
+                ws1.Cell(1, 2).Value = "销量";
+                int rr = 2;
+                for (int i = 0; i < 7; i++)
+                {
+                    var d = start.AddDays(i);
+                    var qty = dict.TryGetValue(d, out var v) ? v : 0;
+                    ws1.Cell(rr, 1).Value = d.ToString("yyyy-MM-dd");
+                    ws1.Cell(rr, 2).Value = qty;
+                    rr++;
+                }
+                ws1.Columns().AdjustToContents();
+
+                // 明细
+                var ws2 = wb.Worksheets.Add("明细");
+                ws2.Cell(1, 1).Value = "日期";
+                ws2.Cell(1, 2).Value = "款式";
+                ws2.Cell(1, 3).Value = "尺码";
+                ws2.Cell(1, 4).Value = "颜色";
+                ws2.Cell(1, 5).Value = "数量";
+                int r = 2;
+                foreach (dynamic row in _detailRows)
+                {
+                    ws2.Cell(r, 1).Value = row.日期;
+                    ws2.Cell(r, 2).Value = row.款式;
+                    ws2.Cell(r, 3).Value = row.尺码;
+                    ws2.Cell(r, 4).Value = row.颜色;
+                    ws2.Cell(r, 5).Value = row.数量;
+                    r++;
+                }
+                ws2.RangeUsed().SetAutoFilter();
+                ws2.Columns().AdjustToContents();
+
+                wb.SaveAs(file);
+
+                var res = MessageBox.Show($"已导出：\n{file}\n\n是否打开所在文件夹？", "导出成功", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                if (res == DialogResult.Yes)
+                {
+                    try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{file}\""); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

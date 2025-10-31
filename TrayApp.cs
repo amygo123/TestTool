@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
+using System.IO;
 
 namespace StyleWatcherWin
 {
@@ -27,19 +28,20 @@ namespace StyleWatcherWin
 
     public class TrayApp : Form
     {
+        // --- Win32 ---
         [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
         [DllImport("user32.dll")] static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
 
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern IntPtr GetFocus(); // 必须有
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, ref int wParam, ref int lParam);
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, StringBuilder lParam);
-        [DllImport("user32.dll")] static extern IntPtr GetFocus();
 
         const int WM_GETTEXTLENGTH = 0x000E;
         const int WM_GETTEXT = 0x000D;
@@ -56,11 +58,13 @@ namespace StyleWatcherWin
                 keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
         }
 
+        // Tray & config
         readonly NotifyIcon _tray = new NotifyIcon();
         readonly ContextMenuStrip _menu = new ContextMenuStrip();
         readonly HttpClient _http = new HttpClient();
         readonly AppConfig _cfg;
 
+        // Single window & throttling
         ResultForm _window;
         readonly SemaphoreSlim _queryLock = new SemaphoreSlim(1, 1);
         DateTime _lastHotkeyAt = DateTime.MinValue;
@@ -77,8 +81,15 @@ namespace StyleWatcherWin
             WindowState = FormWindowState.Minimized;
             Visible = false;
 
+            // 托盘图标（使用 Resources\app.ico）
             _tray.Text = "StyleWatcher";
-            _tray.Icon = SystemIcons.Information;
+            try
+            {
+                var icoPath = Path.Combine(AppContext.BaseDirectory, "Resources", "app.ico");
+                if (File.Exists(icoPath)) _tray.Icon = new Icon(icoPath);
+                else _tray.Icon = SystemIcons.Information;
+            }
+            catch { _tray.Icon = SystemIcons.Information; }
             _tray.Visible = true;
             _tray.DoubleClick += (s, e) => ToggleWindow(show: true);
 
@@ -164,6 +175,7 @@ namespace StyleWatcherWin
             Application.Exit();
         }
 
+        // 选区（Win32）+ 剪贴板兜底
         private string TryGetSelectedTextUsingWin32()
         {
             try
@@ -222,6 +234,7 @@ namespace StyleWatcherWin
             return txt;
         }
 
+        // 热键（去抖 + 限流 + 复用同窗）
         private async Task OnHotkeyAsync()
         {
             var now = DateTime.UtcNow;

@@ -5,18 +5,30 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- 保持你的发布策略：单文件 + 自包含 + 修剪 -->
+    <!-- 发布策略：单文件 + 自包含 + 修剪 -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- 如需固定生成名，可解注释 -->
+
+    <!-- 若你想固定 exe 名称，请取消下一行注释 -->
     <!-- <AssemblyName>StyleWatcher</AssemblyName> -->
+
+    <!-- 应用图标（托盘也复用同一枚） -->
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 稳定可还原，支持 .NET 8 WinForms -->
+    <!-- 图表 -->
     <PackageReference Include="OxyPlot.WindowsForms" Version="2.2.0" />
+    <!-- 导出 Excel -->
+    <PackageReference Include="ClosedXML" Version="0.103.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\app.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>
