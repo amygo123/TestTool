@@ -16,16 +16,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # 用解决方案/默认 restore 一次无妨
       - name: Restore (solution)
         run: dotnet restore
 
       - name: Publish (self-contained single-file)
         run: |
           dotnet restore StyleWatcherWin.csproj
-          dotnet publish StyleWatcherWin.csproj -c Release -r win-x64 --self-contained true `
-            -p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true `
-            -o publish
+          dotnet publish StyleWatcherWin.csproj -c Release -r win-x64 --self-contained true `-p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true `-o publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
