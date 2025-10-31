@@ -5,18 +5,19 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- 单文件自包含发布 -->
+    <!-- 与工作流一致：自包含 + 单文件 + 修剪 -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- WinForms 图表控件（System.Windows.Forms.DataVisualization.Charting） -->
-    <Reference Include="System.Windows.Forms.DataVisualization" />
-    <!-- UIAutomation（System.Windows.Automation） -->
+    <!-- ✅ .NET 8 下 Chart 不再随 WinForms 自动提供，必须用 NuGet 包 -->
+    <PackageReference Include="System.Windows.Forms.DataVisualization" Version="8.0.0" />
+
+    <!-- ✅ UIAutomation（System.Windows.Automation 所需的两个引用） -->
     <Reference Include="UIAutomationClient" />
     <Reference Include="UIAutomationTypes" />
   </ItemGroup>
