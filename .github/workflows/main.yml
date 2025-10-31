@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -16,12 +17,11 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore & Publish (self-contained, single-file)
-        run: |
-          dotnet restore
-          dotnet publish -c Release -r win-x64 --self-contained true ^
-            -p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true ^
-            -o publish
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish (self-contained single-file)
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true -o publish
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
