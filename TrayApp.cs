@@ -9,6 +9,7 @@ using System.Drawing;
 using System.Windows.Automation;
 using System.Collections.Generic;
 
+
 namespace StyleWatcherWin
 {
     public static class Formatter
