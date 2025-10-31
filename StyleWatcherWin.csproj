@@ -5,19 +5,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- 单文件自包含发布；Actions 会覆盖输出目录 -->
+    <!-- 发布参数（与工作流一致） -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
-
-  <ItemGroup>
-    <!-- WinForms 图表控件（Chart/SeriesChartType 在这里） -->
-    <Reference Include="System.Windows.Forms.DataVisualization" />
-    <!-- UI Automation（System.Windows.Automation 在这里） -->
-    <Reference Include="UIAutomationClient" />
-    <Reference Include="UIAutomationTypes" />
-  </ItemGroup>
 </Project>

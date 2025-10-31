@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -6,9 +7,6 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
-using System.Windows.Automation;
-using System.Collections.Generic;
-
 
 namespace StyleWatcherWin
 {
@@ -32,6 +30,7 @@ namespace StyleWatcherWin
         [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
         [DllImport("user32.dll")] static extern void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
+
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
@@ -77,12 +76,8 @@ namespace StyleWatcherWin
             _tray.Visible = true;
 
             var itemQuery = new ToolStripMenuItem("手动输入查询", null, (s, e) => ShowResultWindow("", "请输入要查询的文本后回车"));
-            var itemConfig = new ToolStripMenuItem("打开配置文件", null, (s, e) =>
-            {
-                try { System.Diagnostics.Process.Start("notepad.exe", AppConfig.ConfigPath); } catch { }
-            });
+            var itemConfig = new ToolStripMenuItem("打开配置文件", null, (s, e) => { try { System.Diagnostics.Process.Start("notepad.exe", AppConfig.ConfigPath); } catch { } });
             var itemExit = new ToolStripMenuItem("退出", null, (s, e) => { Application.Exit(); });
-
             _menu.Items.Add(itemQuery);
             _menu.Items.Add(itemConfig);
             _menu.Items.Add(new ToolStripSeparator());
@@ -97,8 +92,7 @@ namespace StyleWatcherWin
             base.OnLoad(e);
             ParseHotkey(_cfg.hotkey, out _mod, out _vk);
             if (!RegisterHotKey(Handle, _hotkeyId, _mod, _vk))
-                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。", "StyleWatcher",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。", "StyleWatcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
             _tray.BalloonTipTitle = "StyleWatcher 已启动";
             _tray.BalloonTipText = $"选中文本后按 {_cfg.hotkey} 查询；右键托盘图标可手动输入或退出。";
@@ -112,35 +106,7 @@ namespace StyleWatcherWin
             base.WndProc(ref m);
         }
 
-        // ---- 获取选中文本：优先 UIA，其次 Win32，最后剪贴板兜底 ----
-        private string TryGetSelectedTextUsingUIA()
-        {
-            try
-            {
-                var element = AutomationElement.FocusedElement;
-                if (element == null) return null;
-
-                if (element.TryGetCurrentPattern(TextPattern.Pattern, out object tpObj) && tpObj is TextPattern tp)
-                {
-                    var ranges = tp.GetSelection();
-                    if (ranges != null && ranges.Length > 0)
-                    {
-                        var txt = ranges[0].GetText(-1) ?? "";
-                        txt = txt.Trim();
-                        if (!string.IsNullOrEmpty(txt)) return txt;
-                    }
-                }
-
-                if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object vpObj) && vpObj is ValuePattern vp2)
-                {
-                    var val = (vp2.Current.Value ?? "").Trim();
-                    if (!string.IsNullOrEmpty(val)) return val;
-                }
-            }
-            catch { }
-            return null;
-        }
-
+        // Win32 获取选中文本
         private string TryGetSelectedTextUsingWin32()
         {
             try
@@ -203,11 +169,9 @@ namespace StyleWatcherWin
         {
             try
             {
-                // 防止 Alt 状态卡住
                 ReleaseAlt();
 
-                string txt = TryGetSelectedTextUsingUIA();
-                if (string.IsNullOrEmpty(txt)) txt = TryGetSelectedTextUsingWin32();
+                string txt = TryGetSelectedTextUsingWin32();
                 if (string.IsNullOrEmpty(txt)) txt = await GetSelectionByClipboardRoundTripAsync();
 
                 if (string.IsNullOrEmpty(txt))
@@ -236,8 +200,7 @@ namespace StyleWatcherWin
 
                 if (method == "GET")
                 {
-                    req = new HttpRequestMessage(HttpMethod.Get,
-                        $"{_cfg.api_url}?{_cfg.json_key}={Uri.EscapeDataString(text)}");
+                    req = new HttpRequestMessage(HttpMethod.Get, $"{_cfg.api_url}?{_cfg.json_key}={Uri.EscapeDataString(text)}");
                 }
                 else
                 {
@@ -250,7 +213,6 @@ namespace StyleWatcherWin
                 var resp = await _http.SendAsync(req);
                 var raw = await resp.Content.ReadAsStringAsync();
 
-                // 兼容 { "msg": "..." } 以及纯文本
                 try
                 {
                     using var doc = JsonDocument.Parse(raw);
@@ -258,15 +220,9 @@ namespace StyleWatcherWin
                         return Formatter.Prettify(msgEl.ToString());
                     return Formatter.Prettify(raw);
                 }
-                catch
-                {
-                    return Formatter.Prettify(raw);
-                }
+                catch { return Formatter.Prettify(raw); }
             }
-            catch (Exception ex)
-            {
-                return $"请求失败：{ex.Message}";
-            }
+            catch (Exception ex) { return $"请求失败：{ex.Message}"; }
         }
 
         protected override void Dispose(bool disposing)
@@ -284,12 +240,8 @@ namespace StyleWatcherWin
 
         private void ParseHotkey(string s, out uint mod, out uint vk)
         {
-            mod = 0;
-            vk  = 0;
-            if (string.IsNullOrWhiteSpace(s))
-            {
-                mod = MOD_ALT; vk = (uint)Keys.S; return;
-            }
+            mod = 0; vk = 0;
+            if (string.IsNullOrWhiteSpace(s)) { mod = MOD_ALT; vk = (uint)Keys.S; return; }
             var parts = s.Split(new[] { '+' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var p in parts)
             {
