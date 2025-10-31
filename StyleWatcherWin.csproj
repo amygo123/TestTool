@@ -3,22 +3,20 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
+    <!-- 单文件自包含发布（由 Actions 覆盖输出目录） -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Windows.Forms.DataVisualization" Version="8.0.0" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <!-- WinForms 图表控件 -->
+    <Reference Include="System.Windows.Forms.DataVisualization" />
+    <!-- UI Automation 支持 -->
     <Reference Include="UIAutomationClient" />
     <Reference Include="UIAutomationTypes" />
   </ItemGroup>
