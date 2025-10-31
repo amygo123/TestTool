@@ -82,15 +82,25 @@ namespace StyleWatcherWin
             Visible = false;
 
             // 托盘图标（使用 Resources\app.ico）
-            _tray.Text = "StyleWatcher";
+            // 托盘图标：直接提取 EXE 的图标，确保与应用图标一致
+            _tray.Text = "款式信息";
             try
             {
-                var icoPath = Path.Combine(AppContext.BaseDirectory, "Resources", "app.ico");
-                if (File.Exists(icoPath)) _tray.Icon = new Icon(icoPath);
-                else _tray.Icon = SystemIcons.Information;
+                var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (exeIcon != null) _tray.Icon = exeIcon;
+                else
+                {
+                    // 兜底再尝试 Resources\app.ico
+                    var icoPath = Path.Combine(AppContext.BaseDirectory, "Resources", "app.ico");
+                    _tray.Icon = File.Exists(icoPath) ? new Icon(icoPath) : SystemIcons.Application;
+                }
             }
-            catch { _tray.Icon = SystemIcons.Information; }
-            _tray.Visible = true;
+            catch
+            {
+                _tray.Icon = SystemIcons.Application;
+            }
+            _tray.Visible = true; // 确保在设置好 Icon 后再显示
+
             _tray.DoubleClick += (s, e) => ToggleWindow(show: true);
 
             var itemToggle = new ToolStripMenuItem("显示/隐藏 窗口", null, (s, e) => ToggleWindow(toggle: true));

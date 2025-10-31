@@ -478,6 +478,7 @@ namespace StyleWatcherWin
         }
 
         // 导出 Excel（ClosedXML）
+// 导出 Excel（ClosedXML）
         void ExportExcel()
         {
             try
@@ -488,37 +489,7 @@ namespace StyleWatcherWin
 
                 using var wb = new XLWorkbook();
 
-                // 摘要
-                var ws0 = wb.Worksheets.Add("摘要");
-                ws0.Cell(1, 1).Value = "标题";
-                ws0.Cell(1, 2).Value = _lblTitle.Text;
-                ws0.Cell(2, 1).Value = "摘要";
-                ws0.Cell(2, 2).Value = _lblSummary.Text;
-                ws0.Columns().AdjustToContents();
-
-                // 趋势7天
-                var ws1 = wb.Worksheets.Add("趋势7天");
-                var model = _pvTrend.Model;
-                // 由 _parsed 再聚合一次，保证导出不依赖图表对象
-                var maxDay = _parsed.Records.Any() ? _parsed.Records.Max(x => x.Date).Date : DateTime.Today;
-                var start = maxDay.AddDays(-6);
-                var dict = _parsed.Records
-                    .GroupBy(r => r.Date.Date)
-                    .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
-                ws1.Cell(1, 1).Value = "日期";
-                ws1.Cell(1, 2).Value = "销量";
-                int rr = 2;
-                for (int i = 0; i < 7; i++)
-                {
-                    var d = start.AddDays(i);
-                    var qty = dict.TryGetValue(d, out var v) ? v : 0;
-                    ws1.Cell(rr, 1).Value = d.ToString("yyyy-MM-dd");
-                    ws1.Cell(rr, 2).Value = qty;
-                    rr++;
-                }
-                ws1.Columns().AdjustToContents();
-
-                // 明细
+                // === Sheet 1: 明细 ===
                 var ws2 = wb.Worksheets.Add("明细");
                 ws2.Cell(1, 1).Value = "日期";
                 ws2.Cell(1, 2).Value = "款式";
@@ -538,9 +509,33 @@ namespace StyleWatcherWin
                 ws2.RangeUsed().SetAutoFilter();
                 ws2.Columns().AdjustToContents();
 
+                // === Sheet 2: 趋势7天 ===
+                var ws1 = wb.Worksheets.Add("趋势7天");
+                // 从 _parsed 聚合近 7 天
+                var maxDay = _parsed.Records.Any() ? _parsed.Records.Max(x => x.Date).Date : DateTime.Today;
+                var start = maxDay.AddDays(-6);
+                var dict = _parsed.Records
+                    .GroupBy(rr => rr.Date.Date)
+                    .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+
+                ws1.Cell(1, 1).Value = "日期";
+                ws1.Cell(1, 2).Value = "销量";
+                int rr = 2;
+                for (int i = 0; i < 7; i++)
+                {
+                    var d = start.AddDays(i);
+                    var qty = dict.TryGetValue(d, out var v) ? v : 0;
+                    ws1.Cell(rr, 1).Value = d.ToString("yyyy-MM-dd");
+                    ws1.Cell(rr, 2).Value = qty;
+                    rr++;
+                }
+                ws1.Columns().AdjustToContents();
+
+                // 不再导出“摘要”sheet
                 wb.SaveAs(file);
 
-                var res = MessageBox.Show($"已导出：\n{file}\n\n是否打开所在文件夹？", "导出成功", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                var res = MessageBox.Show($"已导出：\n{file}\n\n是否打开所在文件夹？", "导出成功",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information);
                 if (res == DialogResult.Yes)
                 {
                     try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{file}\""); } catch { }
@@ -551,5 +546,6 @@ namespace StyleWatcherWin
                 MessageBox.Show($"导出失败：{ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
     }
 }
