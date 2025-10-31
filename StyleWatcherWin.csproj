@@ -14,10 +14,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- ✅ .NET 8 下 Chart 不再随 WinForms 自动提供，必须用 NuGet 包 -->
-    <PackageReference Include="System.Windows.Forms.DataVisualization" Version="8.0.0" />
+    <!-- ✅ WinForms 图表控件：使用框架引用，不要用 NuGet 包 -->
+    <Reference Include="System.Windows.Forms.DataVisualization" />
 
-    <!-- ✅ UIAutomation（System.Windows.Automation 所需的两个引用） -->
+    <!-- ✅ UIA：System.Windows.Automation 所需 -->
     <Reference Include="UIAutomationClient" />
     <Reference Include="UIAutomationTypes" />
   </ItemGroup>
