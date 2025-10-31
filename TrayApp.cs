@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Drawing;
@@ -34,7 +35,6 @@ namespace StyleWatcherWin
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-        [DllImport("user32.dll")] static extern IntPtr GetFocus();
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern IntPtr SendMessage(IntPtr hWnd, int msg, ref int wParam, ref int lParam);
@@ -60,9 +60,14 @@ namespace StyleWatcherWin
         readonly HttpClient _http = new HttpClient();
         readonly AppConfig _cfg;
 
+        ResultForm _window;
+        readonly SemaphoreSlim _queryLock = new SemaphoreSlim(1, 1);
+        DateTime _lastHotkeyAt = DateTime.MinValue;
+
         int _hotkeyId = 1;
         uint _mod;
         uint _vk;
+        bool _allowCloseAll = false;
 
         public TrayApp()
         {
@@ -74,10 +79,22 @@ namespace StyleWatcherWin
             _tray.Text = "StyleWatcher";
             _tray.Icon = SystemIcons.Information;
             _tray.Visible = true;
+            _tray.DoubleClick += (s, e) => ToggleWindow(show: true);
 
-            var itemQuery = new ToolStripMenuItem("手动输入查询", null, (s, e) => ShowResultWindow("", "请输入要查询的文本后回车"));
-            var itemConfig = new ToolStripMenuItem("打开配置文件", null, (s, e) => { try { System.Diagnostics.Process.Start("notepad.exe", AppConfig.ConfigPath); } catch { } });
-            var itemExit = new ToolStripMenuItem("退出", null, (s, e) => { Application.Exit(); });
+            var itemToggle = new ToolStripMenuItem("显示/隐藏 窗口", null, (s, e) => ToggleWindow(toggle: true));
+            var itemQuery = new ToolStripMenuItem("手动输入查询", null, (s, e) =>
+            {
+                EnsureWindow();
+                _window.FocusInput();
+                _window.ShowNoActivateAtCursor();
+            });
+            var itemConfig = new ToolStripMenuItem("打开配置文件", null, (s, e) =>
+            {
+                try { System.Diagnostics.Process.Start("notepad.exe", AppConfig.ConfigPath); } catch { }
+            });
+            var itemExit = new ToolStripMenuItem("退出", null, (s, e) => ExitApp());
+
+            _menu.Items.Add(itemToggle);
             _menu.Items.Add(itemQuery);
             _menu.Items.Add(itemConfig);
             _menu.Items.Add(new ToolStripSeparator());
@@ -92,10 +109,11 @@ namespace StyleWatcherWin
             base.OnLoad(e);
             ParseHotkey(_cfg.hotkey, out _mod, out _vk);
             if (!RegisterHotKey(Handle, _hotkeyId, _mod, _vk))
-                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。", "StyleWatcher", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"热键 {_cfg.hotkey} 注册失败，可能被占用。", "StyleWatcher",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
             _tray.BalloonTipTitle = "StyleWatcher 已启动";
-            _tray.BalloonTipText = $"选中文本后按 {_cfg.hotkey} 查询；右键托盘图标可手动输入或退出。";
+            _tray.BalloonTipText = $"选中文本后按 {_cfg.hotkey} 查询；双击托盘可显示窗口。";
             _tray.ShowBalloonTip(2500);
         }
 
@@ -106,7 +124,45 @@ namespace StyleWatcherWin
             base.WndProc(ref m);
         }
 
-        // Win32 获取选中文本
+        void EnsureWindow()
+        {
+            if (_window == null || _window.IsDisposed)
+            {
+                _window = new ResultForm(_cfg);
+                _window.FormClosing += (s, e) =>
+                {
+                    if (!_allowCloseAll)
+                    {
+                        e.Cancel = true;
+                        _window.Hide();
+                    }
+                };
+            }
+        }
+
+        void ToggleWindow(bool show = false, bool toggle = false)
+        {
+            EnsureWindow();
+            if (toggle)
+            {
+                if (_window.Visible) _window.Hide();
+                else _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+            }
+            else if (show)
+            {
+                _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+            }
+        }
+
+        void ExitApp()
+        {
+            try { UnregisterHotKey(Handle, _hotkeyId, _mod, _vk); } catch { }
+            _allowCloseAll = true;
+            try { _window?.Close(); } catch { }
+            _tray.Visible = false;
+            Application.Exit();
+        }
+
         private string TryGetSelectedTextUsingWin32()
         {
             try
@@ -167,6 +223,16 @@ namespace StyleWatcherWin
 
         private async Task OnHotkeyAsync()
         {
+            var now = DateTime.UtcNow;
+            if ((now - _lastHotkeyAt).TotalMilliseconds < 500) return;
+            _lastHotkeyAt = now;
+
+            if (!await _queryLock.WaitAsync(0))
+            {
+                ToggleWindow(show: true);
+                return;
+            }
+
             try
             {
                 ReleaseAlt();
@@ -174,20 +240,28 @@ namespace StyleWatcherWin
                 string txt = TryGetSelectedTextUsingWin32();
                 if (string.IsNullOrEmpty(txt)) txt = await GetSelectionByClipboardRoundTripAsync();
 
+                EnsureWindow();
+                _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+
                 if (string.IsNullOrEmpty(txt))
                 {
-                    _tray.ShowBalloonTip(2000, "StyleWatcher", "未检测到选中文本，请先选中一段文字再按热键。", ToolTipIcon.Info);
+                    _window.SetLoading("未检测到选中文本，请先选中一段文字再按热键。");
                     return;
                 }
 
+                _window.SetLoading("查询中...");
                 string result = await QueryAsync(txt);
-                ShowResultWindow(txt, result);
-
-                ReleaseAlt();
+                _window.ApplyRawText(txt, result);
             }
             catch (Exception ex)
             {
-                _tray.ShowBalloonTip(2000, "错误", ex.Message, ToolTipIcon.Error);
+                EnsureWindow();
+                _window.SetLoading($"错误：{ex.Message}");
+            }
+            finally
+            {
+                ReleaseAlt();
+                _queryLock.Release();
             }
         }
 
@@ -225,19 +299,6 @@ namespace StyleWatcherWin
             catch (Exception ex) { return $"请求失败：{ex.Message}"; }
         }
 
-        protected override void Dispose(bool disposing)
-        {
-            try { UnregisterHotKey(Handle, _hotkeyId, _mod, _vk); } catch { }
-            if (disposing)
-            {
-                _tray.Visible = false;
-                _tray.Dispose();
-                _menu?.Dispose();
-                _http?.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
         private void ParseHotkey(string s, out uint mod, out uint vk)
         {
             mod = 0; vk = 0;
@@ -253,18 +314,6 @@ namespace StyleWatcherWin
                 else if (Enum.TryParse(t, true, out Keys key)) vk = (uint)key;
             }
             if (vk == 0) { mod = MOD_ALT; vk = (uint)Keys.S; }
-        }
-
-        private void ShowResultWindow(string input, string result)
-        {
-            using (var f = new ResultForm(_cfg, input, result))
-            {
-                f.StartPosition = FormStartPosition.Manual;
-                var p = Cursor.Position;
-                f.Location = new Point(p.X + 12, p.Y + 12);
-                f.TopMost = _cfg.window.alwaysOnTop;
-                f.ShowDialog();
-            }
         }
     }
 }

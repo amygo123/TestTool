@@ -5,11 +5,18 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- 发布参数（与工作流一致） -->
+    <!-- 保持你的发布策略：单文件 + 自包含 + 修剪 -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- 如需固定生成名，可解注释 -->
+    <!-- <AssemblyName>StyleWatcher</AssemblyName> -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 稳定可还原，支持 .NET 8 WinForms -->
+    <PackageReference Include="OxyPlot.WindowsForms" Version="2.2.0" />
+  </ItemGroup>
 </Project>
