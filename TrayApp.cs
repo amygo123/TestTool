@@ -168,11 +168,11 @@ namespace StyleWatcherWin
             if (toggle)
             {
                 if (_window.Visible) _window.Hide();
-                else _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+                else _window.ShowAndFocusCentered(_cfg.window.alwaysOnTop);
             }
             else if (show)
             {
-                _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+                _window.ShowAndFocusCentered(_cfg.window.alwaysOnTop);
             }
         }
 
@@ -265,7 +265,7 @@ namespace StyleWatcherWin
                 if (string.IsNullOrEmpty(txt)) txt = await GetSelectionByClipboardRoundTripAsync();
 
                 EnsureWindow();
-                _window.ShowAndFocusNearCursor(_cfg.window.alwaysOnTop);
+                _window.ShowAndFocusCentered(_cfg.window.alwaysOnTop);
 
                 if (string.IsNullOrEmpty(txt))
                 {
