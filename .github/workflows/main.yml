@@ -20,19 +20,22 @@ jobs:
         run: dotnet restore
 
       - name: Publish (self-contained single-file)
+        shell: pwsh
         run: |
           dotnet restore StyleWatcherWin.csproj
           dotnet publish StyleWatcherWin.csproj -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true -p:TrimMode=partial -p:InvariantGlobalization=true `
-            -o publish
-
+            -o "$PWD/publish"
+      
       - name: List publish dir (debug)
-        run: dir /b publish
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path "$PWD/publish" -Recurse -File | Select-Object FullName, Length
       
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: StyleWatcher-win-x64
-          path: publish/*.exe
+          # 用 PowerShell/Windows 通用的写法，避免路径分隔符问题
+          path: ${{ github.workspace }}\publish\*.exe
           if-no-files-found: error
-
