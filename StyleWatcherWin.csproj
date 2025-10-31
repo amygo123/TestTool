@@ -5,11 +5,27 @@
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
+<<<<<<< HEAD
     <!-- 发布参数（与工作流一致） -->
+=======
+    <!-- 与工作流一致：自包含 + 单文件 + 修剪 -->
+>>>>>>> 0db6020132cd2359e3ab66bdce828cd7db53b4c4
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <TrimMode>partial</TrimMode>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+<<<<<<< HEAD
+=======
+
+  <ItemGroup>
+    <!-- ✅ WinForms 图表控件：使用框架引用，不要用 NuGet 包 -->
+    <Reference Include="System.Windows.Forms.DataVisualization" />
+
+    <!-- ✅ UIA：System.Windows.Automation 所需 -->
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+  </ItemGroup>
+>>>>>>> 0db6020132cd2359e3ab66bdce828cd7db53b4c4
 </Project>
