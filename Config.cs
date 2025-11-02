@@ -6,6 +6,11 @@ namespace StyleWatcherWin
 {
     public class AppConfig
     {
+        public string inventory_api_url { get; set; } = "http://192.168.40.97:8000/inventory";
+        public int inventory_timeout_seconds { get; set; } = 4;
+        public int inventory_cache_ttl_seconds { get; set; } = 300;
+        public int inventory_low_threshold { get; set; } = 10;
+
         public string api_url { get; set; } = "http://47.111.189.27:8089/qrcode/saleVolumeParser";
         public string method { get; set; } = "POST";
         public string json_key { get; set; } = "code";
