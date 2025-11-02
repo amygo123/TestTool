@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -41,7 +42,6 @@ namespace StyleWatcherWin
             int Rank(string s)
             {
                 for (int i=0;i<order.Length;i++) if (string.Equals(s, order[i], StringComparison.OrdinalIgnoreCase)) return i;
-                // 带 -CP 或其它后缀的统一放在后面
                 return 100 + s.Length;
             }
             return sizes.Distinct().OrderBy(Rank).ThenBy(s=>s).ToList();
