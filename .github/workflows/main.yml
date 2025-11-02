@@ -1,9 +1,14 @@
-name: Build Windows EXE
+name: build
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+      - feature/**
+      - resolve/**
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -12,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup .NET 8
+      - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -26,6 +31,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StyleWatcher-win-x64
-          path: publish/StyleWatcher.exe
-          if-no-files-found: error
+          name: StyleWatcher
+          path: publish/**
