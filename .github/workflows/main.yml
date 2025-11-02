@@ -6,6 +6,7 @@ on:
       - main
       - feature/**
       - resolve/**
+      - clean/**
   pull_request:
     branches:
       - main
